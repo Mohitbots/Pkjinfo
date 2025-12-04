@@ -1,0 +1,666 @@
+---
+title: "React Hooks: A Complete Guide"
+description: "Master React Hooks with this comprehensive guide covering useState, useEffect, useContext, custom hooks, and advanced patterns for building modern React applications."
+date: "2024-11-20"
+author: "Your Name"
+image: "/images/blog/react-hooks.jpg"
+tags: ["react", "hooks", "javascript", "frontend"]
+category: "Tutorial"
+featured: true
+draft: false
+---
+
+## Introduction
+
+React Hooks revolutionized how we write React components by allowing us to use state and other React features without writing a class. In this comprehensive guide, we'll explore all the essential hooks and learn how to use them effectively.
+
+## Why Hooks?
+
+Before Hooks, React developers faced several challenges:
+
+- **Complex components**: Logic was scattered across lifecycle methods
+- **Reusing stateful logic**: Difficult without render props or HOCs
+- **Classes confusion**: `this` binding and class syntax complexity
+
+Hooks solve these problems by letting us:
+- Use state and effects in function components
+- Extract and reuse stateful logic
+- Write cleaner, more readable code
+
+## The Basic Hooks
+
+### useState - Managing State
+
+The most fundamental hook for adding state to functional components.
+
+```jsx
+import { useState } from 'react';
+
+function Counter() {
+  const [count, setCount] = useState(0);
+
+  return (
+    <div>
+      <p>Count: {count}</p>
+      <button onClick={() => setCount(count + 1)}>
+        Increment
+      </button>
+    </div>
+  );
+}
+```
+
+#### Multiple State Variables
+
+```jsx
+function UserForm() {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [age, setAge] = useState(0);
+
+  return (
+    <form>
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Name"
+      />
+      <input
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        placeholder="Email"
+      />
+      <input
+        type="number"
+        value={age}
+        onChange={(e) => setAge(Number(e.target.value))}
+        placeholder="Age"
+      />
+    </form>
+  );
+}
+```
+
+#### State with Objects
+
+```jsx
+function Profile() {
+  const [user, setUser] = useState({
+    name: '',
+    email: '',
+    bio: '',
+  });
+
+  const updateField = (field, value) => {
+    setUser((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
+
+  return (
+    <form>
+      <input
+        value={user.name}
+        onChange={(e) => updateField('name', e.target.value)}
+      />
+      <input
+        value={user.email}
+        onChange={(e) => updateField('email', e.target.value)}
+      />
+      <textarea
+        value={user.bio}
+        onChange={(e) => updateField('bio', e.target.value)}
+      />
+    </form>
+  );
+}
+```
+
+### useEffect - Side Effects
+
+Handle side effects like data fetching, subscriptions, or DOM manipulation.
+
+```jsx
+import { useState, useEffect } from 'react';
+
+function UserProfile({ userId }) {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    // Effect runs when userId changes
+    setLoading(true);
+    
+    fetch(`/api/users/${userId}`)
+      .then((res) => res.json())
+      .then((data) => {
+        setUser(data);
+        setLoading(false);
+      })
+      .catch((err) => {
+        setError(err.message);
+        setLoading(false);
+      });
+
+    // Cleanup function
+    return () => {
+      // Cancel any pending requests
+      console.log('Cleanup for userId:', userId);
+    };
+  }, [userId]); // Dependency array
+
+  if (loading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error}</div>;
+  if (!user) return null;
+
+  return (
+    <div>
+      <h2>{user.name}</h2>
+      <p>{user.email}</p>
+    </div>
+  );
+}
+```
+
+#### Effect Patterns
+
+**Run once on mount:**
+```jsx
+useEffect(() => {
+  console.log('Component mounted');
+}, []); // Empty dependency array
+```
+
+**Run on every render:**
+```jsx
+useEffect(() => {
+  console.log('Component rendered');
+}); // No dependency array
+```
+
+**Run when specific values change:**
+```jsx
+useEffect(() => {
+  console.log('Count changed:', count);
+}, [count]); // Runs when count changes
+```
+
+### useContext - Accessing Context
+
+Share data across components without prop drilling.
+
+```jsx
+import { createContext, useContext, useState } from 'react';
+
+// Create context
+const ThemeContext = createContext();
+
+// Provider component
+function ThemeProvider({ children }) {
+  const [theme, setTheme] = useState('light');
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
+  };
+
+  return (
+    <ThemeContext.Provider value={{ theme, toggleTheme }}>
+      {children}
+    </ThemeContext.Provider>
+  );
+}
+
+// Consumer component
+function ThemeToggle() {
+  const { theme, toggleTheme } = useContext(ThemeContext);
+
+  return (
+    <button onClick={toggleTheme}>
+      Current theme: {theme}
+    </button>
+  );
+}
+
+// Usage
+function App() {
+  return (
+    <ThemeProvider>
+      <ThemeToggle />
+    </ThemeProvider>
+  );
+}
+```
+
+## Advanced Hooks
+
+### useReducer - Complex State Logic
+
+When state logic is complex, useReducer is often clearer than useState.
+
+```jsx
+import { useReducer } from 'react';
+
+const initialState = {
+  cart: [],
+  total: 0,
+};
+
+function cartReducer(state, action) {
+  switch (action.type) {
+    case 'ADD_ITEM':
+      return {
+        ...state,
+        cart: [...state.cart, action.payload],
+        total: state.total + action.payload.price,
+      };
+    
+    case 'REMOVE_ITEM':
+      const item = state.cart.find((i) => i.id === action.payload);
+      return {
+        ...state,
+        cart: state.cart.filter((i) => i.id !== action.payload),
+        total: state.total - (item?.price || 0),
+      };
+    
+    case 'CLEAR_CART':
+      return initialState;
+    
+    default:
+      return state;
+  }
+}
+
+function ShoppingCart() {
+  const [state, dispatch] = useReducer(cartReducer, initialState);
+
+  const addItem = (item) => {
+    dispatch({ type: 'ADD_ITEM', payload: item });
+  };
+
+  const removeItem = (id) => {
+    dispatch({ type: 'REMOVE_ITEM', payload: id });
+  };
+
+  const clearCart = () => {
+    dispatch({ type: 'CLEAR_CART' });
+  };
+
+  return (
+    <div>
+      <h2>Cart ({state.cart.length} items)</h2>
+      <p>Total: ${state.total}</p>
+      {state.cart.map((item) => (
+        <div key={item.id}>
+          <span>{item.name}</span>
+          <button onClick={() => removeItem(item.id)}>Remove</button>
+        </div>
+      ))}
+      <button onClick={clearCart}>Clear Cart</button>
+    </div>
+  );
+}
+```
+
+### useRef - Mutable References
+
+useRef holds a mutable value that doesn't cause re-renders.
+
+```jsx
+import { useRef, useEffect } from 'react';
+
+function AutoFocusInput() {
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    // Focus input on mount
+    inputRef.current?.focus();
+  }, []);
+
+  return <input ref={inputRef} />;
+}
+```
+
+**Storing previous values:**
+```jsx
+function UsePrevious(value) {
+  const ref = useRef();
+  
+  useEffect(() => {
+    ref.current = value;
+  }, [value]);
+  
+  return ref.current;
+}
+
+function Counter() {
+  const [count, setCount] = useState(0);
+  const prevCount = usePrevious(count);
+
+  return (
+    <div>
+      <p>Current: {count}</p>
+      <p>Previous: {prevCount}</p>
+      <button onClick={() => setCount(count + 1)}>Increment</button>
+    </div>
+  );
+}
+```
+
+### useMemo - Expensive Computations
+
+Memoize expensive calculations.
+
+```jsx
+import { useMemo, useState } from 'react';
+
+function ExpensiveComponent({ items }) {
+  const [filter, setFilter] = useState('');
+
+  // Only recalculate when items or filter changes
+  const filteredItems = useMemo(() => {
+    console.log('Filtering items...');
+    return items.filter((item) =>
+      item.name.toLowerCase().includes(filter.toLowerCase())
+    );
+  }, [items, filter]);
+
+  return (
+    <div>
+      <input
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+        placeholder="Search..."
+      />
+      {filteredItems.map((item) => (
+        <div key={item.id}>{item.name}</div>
+      ))}
+    </div>
+  );
+}
+```
+
+### useCallback - Memoized Callbacks
+
+Prevent unnecessary re-renders when passing callbacks to child components.
+
+```jsx
+import { useCallback, useState, memo } from 'react';
+
+const ChildComponent = memo(({ onClick }) => {
+  console.log('Child rendered');
+  return <button onClick={onClick}>Click me</button>;
+});
+
+function ParentComponent() {
+  const [count, setCount] = useState(0);
+  const [other, setOther] = useState(0);
+
+  // Without useCallback, this function is recreated on every render
+  const handleClick = useCallback(() => {
+    setCount((c) => c + 1);
+  }, []); // Empty deps - function never changes
+
+  return (
+    <div>
+      <p>Count: {count}</p>
+      <p>Other: {other}</p>
+      <ChildComponent onClick={handleClick} />
+      <button onClick={() => setOther(other + 1)}>
+        Update Other
+      </button>
+    </div>
+  );
+}
+```
+
+## Custom Hooks
+
+Custom hooks let you extract component logic into reusable functions.
+
+### useLocalStorage
+
+```jsx
+function useLocalStorage(key, initialValue) {
+  const [storedValue, setStoredValue] = useState(() => {
+    try {
+      const item = window.localStorage.getItem(key);
+      return item ? JSON.parse(item) : initialValue;
+    } catch (error) {
+      console.error(error);
+      return initialValue;
+    }
+  });
+
+  const setValue = (value) => {
+    try {
+      const valueToStore =
+        value instanceof Function ? value(storedValue) : value;
+      setStoredValue(valueToStore);
+      window.localStorage.setItem(key, JSON.stringify(valueToStore));
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  return [storedValue, setValue];
+}
+
+// Usage
+function App() {
+  const [name, setName] = useLocalStorage('name', '');
+
+  return (
+    <input
+      value={name}
+      onChange={(e) => setName(e.target.value)}
+    />
+  );
+}
+```
+
+### useFetch
+
+```jsx
+function useFetch(url) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const abortController = new AbortController();
+
+    setLoading(true);
+    
+    fetch(url, { signal: abortController.signal })
+      .then((res) => res.json())
+      .then((data) => {
+        setData(data);
+        setLoading(false);
+      })
+      .catch((err) => {
+        if (err.name !== 'AbortError') {
+          setError(err.message);
+          setLoading(false);
+        }
+      });
+
+    return () => abortController.abort();
+  }, [url]);
+
+  return { data, loading, error };
+}
+
+// Usage
+function UserList() {
+  const { data, loading, error } = useFetch('/api/users');
+
+  if (loading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error}</div>;
+
+  return (
+    <ul>
+      {data?.map((user) => (
+        <li key={user.id}>{user.name}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### useDebounce
+
+```jsx
+function useDebounce(value, delay) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [value, delay]);
+
+  return debouncedValue;
+}
+
+// Usage
+function SearchComponent() {
+  const [searchTerm, setSearchTerm] = useState('');
+  const debouncedSearchTerm = useDebounce(searchTerm, 500);
+
+  useEffect(() => {
+    if (debouncedSearchTerm) {
+      // Perform search
+      console.log('Searching for:', debouncedSearchTerm);
+    }
+  }, [debouncedSearchTerm]);
+
+  return (
+    <input
+      value={searchTerm}
+      onChange={(e) => setSearchTerm(e.target.value)}
+      placeholder="Search..."
+    />
+  );
+}
+```
+
+## Best Practices
+
+### 1. Rules of Hooks
+
+- Only call hooks at the top level
+- Only call hooks from React functions
+- Use ESLint plugin for enforcement
+
+### 2. Dependency Arrays
+
+Always include all values used inside the effect:
+
+```jsx
+// ❌ Bad - missing dependency
+useEffect(() => {
+  console.log(count);
+}, []);
+
+// ✅ Good
+useEffect(() => {
+  console.log(count);
+}, [count]);
+```
+
+### 3. Cleanup Effects
+
+Always clean up subscriptions and timers:
+
+```jsx
+useEffect(() => {
+  const timer = setInterval(() => {
+    console.log('Tick');
+  }, 1000);
+
+  return () => clearInterval(timer);
+}, []);
+```
+
+### 4. Optimize Performance
+
+Use memo, useMemo, and useCallback wisely:
+
+```jsx
+// Only memoize expensive operations
+const expensiveValue = useMemo(() => {
+  return items.reduce((sum, item) => sum + item.value, 0);
+}, [items]);
+```
+
+### 5. Custom Hook Naming
+
+Always prefix custom hooks with "use":
+
+```jsx
+// ✅ Good
+function useWindowSize() { ... }
+
+// ❌ Bad
+function getWindowSize() { ... }
+```
+
+## Common Patterns
+
+### Form Handling
+
+```jsx
+function useForm(initialValues) {
+  const [values, setValues] = useState(initialValues);
+
+  const handleChange = (e) => {
+    setValues({
+      ...values,
+      [e.target.name]: e.target.value,
+    });
+  };
+
+  const reset = () => setValues(initialValues);
+
+  return { values, handleChange, reset };
+}
+```
+
+### Toggle State
+
+```jsx
+function useToggle(initialValue = false) {
+  const [value, setValue] = useState(initialValue);
+
+  const toggle = useCallback(() => {
+    setValue((v) => !v);
+  }, []);
+
+  return [value, toggle];
+}
+```
+
+## Conclusion
+
+React Hooks have transformed how we build React applications. They provide:
+
+- Cleaner, more readable code
+- Better code reuse
+- Simplified state management
+- Improved performance optimization
+
+Master these hooks and patterns, and you'll be well-equipped to build modern, efficient React applications!
+
+## Resources
+
+- [React Hooks Documentation](https://react.dev/reference/react)
+- [useHooks.com](https://usehooks.com)
+- [React Hooks Cheat Sheet](https://react-hooks-cheatsheet.com)
+
+Happy hooking! ⚛️

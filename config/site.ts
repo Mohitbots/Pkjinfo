@@ -1,0 +1,15 @@
+export const siteMetadata = {
+  title: "My Tech Blog",
+  author: "Your Name",
+  headerTitle: "TechBlog",
+  description: "A blog about web development, programming, and technology",
+  language: "en-us",
+  theme: "system",
+  siteUrl: "https://yourblog.com",
+  siteLogo: "/logo.svg",
+  email: "your.email@example.com",
+  github: "https://github.com/yourusername",
+  twitter: "https://twitter.com/yourusername",
+  linkedin: "https://linkedin.com/in/yourusername",
+  locale: "en-US",
+};
