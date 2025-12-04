@@ -1,0 +1,731 @@
+---
+title: "Building a REST API with Node.js and Express"
+description: "Learn how to build a production-ready RESTful API using Node.js, Express, and MongoDB with best practices for authentication and error handling."
+date: "2024-11-25"
+author: "Your Name"
+image: "/images/blog/nodejs-api.jpg"
+tags: ["nodejs", "express", "backend", "api", "mongodb"]
+category: "Backend"
+featured: false
+draft: false
+---
+
+## Introduction
+
+Building a robust REST API is a fundamental skill for modern backend developers. In this comprehensive guide, we'll create a production-ready API using Node.js and Express, covering everything from setup to deployment.
+
+## What We'll Build
+
+We're going to create a blog API with the following features:
+
+- User authentication (JWT)
+- CRUD operations for blog posts
+- Input validation
+- Error handling
+- Security best practices
+- MongoDB integration
+
+## Prerequisites
+
+Before we begin, make sure you have:
+
+- Node.js (v18+) installed
+- MongoDB (local or Atlas)
+- Basic JavaScript knowledge
+- Understanding of HTTP methods
+
+## Project Setup
+
+Let's start by initializing our project:
+
+```bash
+mkdir blog-api
+cd blog-api
+npm init -y
+```
+
+### Install Dependencies
+
+```bash
+npm install express mongoose dotenv bcryptjs jsonwebtoken cors helmet
+npm install -D nodemon @types/node
+```
+
+### Project Structure
+
+```
+blog-api/
+├── src/
+│   ├── controllers/
+│   │   ├── authController.js
+│   │   └── postController.js
+│   ├── models/
+│   │   ├── User.js
+│   │   └── Post.js
+│   ├── middleware/
+│   │   ├── auth.js
+│   │   ├── errorHandler.js
+│   │   └── validation.js
+│   ├── routes/
+│   │   ├── auth.js
+│   │   └── posts.js
+│   ├── utils/
+│   │   └── helpers.js
+│   └── app.js
+├── .env
+├── .gitignore
+└── package.json
+```
+
+## Setting Up Express
+
+Let's create our main application file:
+
+```javascript
+// src/app.js
+const express = require('express');
+const mongoose = require('mongoose');
+const cors = require('cors');
+const helmet = require('helmet');
+require('dotenv').config();
+
+const app = express();
+
+// Middleware
+app.use(helmet()); // Security headers
+app.use(cors()); // Enable CORS
+app.use(express.json()); // Parse JSON bodies
+app.use(express.urlencoded({ extended: true }));
+
+// Routes
+app.use('/api/auth', require('./routes/auth'));
+app.use('/api/posts', require('./routes/posts'));
+
+// Health check
+app.get('/health', (req, res) => {
+  res.json({ status: 'OK', timestamp: new Date() });
+});
+
+// Error handling middleware
+app.use(require('./middleware/errorHandler'));
+
+// Database connection
+mongoose
+  .connect(process.env.MONGODB_URI)
+  .then(() => console.log('Connected to MongoDB'))
+  .catch((err) => console.error('MongoDB connection error:', err));
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
+
+module.exports = app;
+```
+
+## Environment Variables
+
+Create a `.env` file:
+
+```env
+PORT=3000
+MONGODB_URI=mongodb://localhost:27017/blog-api
+JWT_SECRET=your-super-secret-jwt-key-change-this
+JWT_EXPIRE=7d
+NODE_ENV=development
+```
+
+## Creating Models
+
+### User Model
+
+```javascript
+// src/models/User.js
+const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
+
+const userSchema = new mongoose.Schema(
+  {
+    name: {
+      type: String,
+      required: [true, 'Name is required'],
+      trim: true,
+      maxlength: [50, 'Name cannot exceed 50 characters'],
+    },
+    email: {
+      type: String,
+      required: [true, 'Email is required'],
+      unique: true,
+      lowercase: true,
+      match: [/^\S+@\S+\.\S+$/, 'Please provide a valid email'],
+    },
+    password: {
+      type: String,
+      required: [true, 'Password is required'],
+      minlength: [6, 'Password must be at least 6 characters'],
+      select: false, // Don't return password by default
+    },
+    role: {
+      type: String,
+      enum: ['user', 'admin'],
+      default: 'user',
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+// Hash password before saving
+userSchema.pre('save', async function (next) {
+  if (!this.isModified('password')) return next();
+  
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(this.password, salt);
+  next();
+});
+
+// Compare password method
+userSchema.methods.comparePassword = async function (candidatePassword) {
+  return await bcrypt.compare(candidatePassword, this.password);
+};
+
+module.exports = mongoose.model('User', userSchema);
+```
+
+### Post Model
+
+```javascript
+// src/models/Post.js
+const mongoose = require('mongoose');
+
+const postSchema = new mongoose.Schema(
+  {
+    title: {
+      type: String,
+      required: [true, 'Title is required'],
+      trim: true,
+      maxlength: [100, 'Title cannot exceed 100 characters'],
+    },
+    content: {
+      type: String,
+      required: [true, 'Content is required'],
+    },
+    excerpt: {
+      type: String,
+      maxlength: [200, 'Excerpt cannot exceed 200 characters'],
+    },
+    author: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+    },
+    tags: [
+      {
+        type: String,
+        trim: true,
+      },
+    ],
+    published: {
+      type: Boolean,
+      default: false,
+    },
+    views: {
+      type: Number,
+      default: 0,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+// Create index for search
+postSchema.index({ title: 'text', content: 'text' });
+
+module.exports = mongoose.model('Post', postSchema);
+```
+
+## Authentication Middleware
+
+```javascript
+// src/middleware/auth.js
+const jwt = require('jsonwebtoken');
+const User = require('../models/User');
+
+exports.protect = async (req, res, next) => {
+  try {
+    let token;
+
+    // Check for token in headers
+    if (
+      req.headers.authorization &&
+      req.headers.authorization.startsWith('Bearer')
+    ) {
+      token = req.headers.authorization.split(' ')[1];
+    }
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'Not authorized to access this route',
+      });
+    }
+
+    // Verify token
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    // Get user from token
+    req.user = await User.findById(decoded.id);
+
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: 'User not found',
+      });
+    }
+
+    next();
+  } catch (error) {
+    return res.status(401).json({
+      success: false,
+      message: 'Not authorized to access this route',
+    });
+  }
+};
+
+// Role-based access control
+exports.authorize = (...roles) => {
+  return (req, res, next) => {
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: 'User role not authorized to access this route',
+      });
+    }
+    next();
+  };
+};
+```
+
+## Authentication Controller
+
+```javascript
+// src/controllers/authController.js
+const jwt = require('jsonwebtoken');
+const User = require('../models/User');
+
+// Generate JWT token
+const generateToken = (id) => {
+  return jwt.sign({ id }, process.env.JWT_SECRET, {
+    expiresIn: process.env.JWT_EXPIRE,
+  });
+};
+
+// @desc    Register user
+// @route   POST /api/auth/register
+// @access  Public
+exports.register = async (req, res, next) => {
+  try {
+    const { name, email, password } = req.body;
+
+    // Check if user exists
+    const userExists = await User.findOne({ email });
+    if (userExists) {
+      return res.status(400).json({
+        success: false,
+        message: 'User already exists',
+      });
+    }
+
+    // Create user
+    const user = await User.create({
+      name,
+      email,
+      password,
+    });
+
+    // Generate token
+    const token = generateToken(user._id);
+
+    res.status(201).json({
+      success: true,
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Login user
+// @route   POST /api/auth/login
+// @access  Public
+exports.login = async (req, res, next) => {
+  try {
+    const { email, password } = req.body;
+
+    // Validate input
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide email and password',
+      });
+    }
+
+    // Check for user
+    const user = await User.findOne({ email }).select('+password');
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid credentials',
+      });
+    }
+
+    // Check password
+    const isMatch = await user.comparePassword(password);
+
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid credentials',
+      });
+    }
+
+    // Generate token
+    const token = generateToken(user._id);
+
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get current user
+// @route   GET /api/auth/me
+// @access  Private
+exports.getMe = async (req, res, next) => {
+  try {
+    const user = req.user;
+
+    res.json({
+      success: true,
+      data: user,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+```
+
+## Post Controller
+
+```javascript
+// src/controllers/postController.js
+const Post = require('../models/Post');
+
+// @desc    Get all posts
+// @route   GET /api/posts
+// @access  Public
+exports.getPosts = async (req, res, next) => {
+  try {
+    const { page = 1, limit = 10, search, tags } = req.query;
+
+    // Build query
+    const query = {};
+    
+    if (search) {
+      query.$text = { $search: search };
+    }
+    
+    if (tags) {
+      query.tags = { $in: tags.split(',') };
+    }
+
+    // Only show published posts to non-authenticated users
+    if (!req.user) {
+      query.published = true;
+    }
+
+    const posts = await Post.find(query)
+      .populate('author', 'name email')
+      .limit(limit * 1)
+      .skip((page - 1) * limit)
+      .sort({ createdAt: -1 });
+
+    const count = await Post.countDocuments(query);
+
+    res.json({
+      success: true,
+      data: posts,
+      totalPages: Math.ceil(count / limit),
+      currentPage: page,
+      total: count,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get single post
+// @route   GET /api/posts/:id
+// @access  Public
+exports.getPost = async (req, res, next) => {
+  try {
+    const post = await Post.findById(req.params.id).populate(
+      'author',
+      'name email'
+    );
+
+    if (!post) {
+      return res.status(404).json({
+        success: false,
+        message: 'Post not found',
+      });
+    }
+
+    // Increment views
+    post.views += 1;
+    await post.save();
+
+    res.json({
+      success: true,
+      data: post,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Create post
+// @route   POST /api/posts
+// @access  Private
+exports.createPost = async (req, res, next) => {
+  try {
+    req.body.author = req.user.id;
+
+    const post = await Post.create(req.body);
+
+    res.status(201).json({
+      success: true,
+      data: post,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Update post
+// @route   PUT /api/posts/:id
+// @access  Private
+exports.updatePost = async (req, res, next) => {
+  try {
+    let post = await Post.findById(req.params.id);
+
+    if (!post) {
+      return res.status(404).json({
+        success: false,
+        message: 'Post not found',
+      });
+    }
+
+    // Check ownership or admin role
+    if (post.author.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to update this post',
+      });
+    }
+
+    post = await Post.findByIdAndUpdate(req.params.id, req.body, {
+      new: true,
+      runValidators: true,
+    });
+
+    res.json({
+      success: true,
+      data: post,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Delete post
+// @route   DELETE /api/posts/:id
+// @access  Private
+exports.deletePost = async (req, res, next) => {
+  try {
+    const post = await Post.findById(req.params.id);
+
+    if (!post) {
+      return res.status(404).json({
+        success: false,
+        message: 'Post not found',
+      });
+    }
+
+    // Check ownership or admin role
+    if (post.author.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to delete this post',
+      });
+    }
+
+    await post.deleteOne();
+
+    res.json({
+      success: true,
+      data: {},
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+```
+
+## Error Handling Middleware
+
+```javascript
+// src/middleware/errorHandler.js
+const errorHandler = (err, req, res, next) => {
+  let error = { ...err };
+  error.message = err.message;
+
+  // Log error for dev
+  if (process.env.NODE_ENV === 'development') {
+    console.error(err);
+  }
+
+  // Mongoose bad ObjectId
+  if (err.name === 'CastError') {
+    const message = 'Resource not found';
+    error = { message, statusCode: 404 };
+  }
+
+  // Mongoose duplicate key
+  if (err.code === 11000) {
+    const message = 'Duplicate field value entered';
+    error = { message, statusCode: 400 };
+  }
+
+  // Mongoose validation error
+  if (err.name === 'ValidationError') {
+    const message = Object.values(err.errors).map((val) => val.message);
+    error = { message, statusCode: 400 };
+  }
+
+  res.status(error.statusCode || 500).json({
+    success: false,
+    error: error.message || 'Server Error',
+  });
+};
+
+module.exports = errorHandler;
+```
+
+## Routes
+
+```javascript
+// src/routes/auth.js
+const express = require('express');
+const { register, login, getMe } = require('../controllers/authController');
+const { protect } = require('../middleware/auth');
+
+const router = express.Router();
+
+router.post('/register', register);
+router.post('/login', login);
+router.get('/me', protect, getMe);
+
+module.exports = router;
+```
+
+```javascript
+// src/routes/posts.js
+const express = require('express');
+const {
+  getPosts,
+  getPost,
+  createPost,
+  updatePost,
+  deletePost,
+} = require('../controllers/postController');
+const { protect, authorize } = require('../middleware/auth');
+
+const router = express.Router();
+
+router.route('/').get(getPosts).post(protect, createPost);
+
+router
+  .route('/:id')
+  .get(getPost)
+  .put(protect, updatePost)
+  .delete(protect, authorize('admin'), deletePost);
+
+module.exports = router;
+```
+
+## Testing the API
+
+### Register a User
+```bash
+curl -X POST http://localhost:3000/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"name":"John Doe","email":"john@example.com","password":"password123"}'
+```
+
+### Login
+```bash
+curl -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"john@example.com","password":"password123"}'
+```
+
+### Create a Post
+```bash
+curl -X POST http://localhost:3000/api/posts \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{"title":"My First Post","content":"This is the content","tags":["nodejs","api"]}'
+```
+
+## Best Practices
+
+1. **Always validate input** - Use libraries like Joi or express-validator
+2. **Use environment variables** - Never hardcode secrets
+3. **Implement rate limiting** - Prevent abuse with express-rate-limit
+4. **Add logging** - Use winston or morgan
+5. **Use HTTPS** - In production, always use SSL/TLS
+6. **Implement pagination** - Don't return all data at once
+7. **Version your API** - Use `/api/v1/` for future compatibility
+8. **Document your API** - Use Swagger/OpenAPI
+
+## Conclusion
+
+You now have a solid foundation for building REST APIs with Node.js and Express. This API includes authentication, CRUD operations, error handling, and security best practices.
+
+Next steps:
+- Add input validation with Joi
+- Implement rate limiting
+- Add API documentation with Swagger
+- Write tests with Jest
+- Deploy to production (Heroku, AWS, etc.)
+
+Happy coding! 🚀
